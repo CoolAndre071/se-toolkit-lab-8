@@ -227,70 +227,84 @@ Response to webchat:...: I've sent you a list of available labs. Please pick whi
 
 ## Task 3A — Structured logging
 
-### Happy-path log excerpt
+### Happy-path log excerpt (JSON from VictoriaLogs)
 
-From `docker compose logs backend --tail 40`, a healthy request shows the
-structured event chain:
+Query: `_time:2h service.name:"Learning Management Service" severity:INFO limit=3`
 
-```
-backend-1  | request_started
-backend-1  | [trace_id=4b496ec1...] auth_success
-backend-1  | [trace_id=4b496ec1...] request_completed
-```
-
-The full log lines include `service.name="Learning Management Service"`,
-`trace_id`, `span_id`, and `trace_sampled=True`.
-
-### Error-path log excerpt
-
-After stopping PostgreSQL and triggering a request:
-
-```
-backend-1  | socket.gaierror: [Errno -2] Name or service not known
-backend-1  |   File ".../asyncpg/connect_utils.py", line 1249, in _connect
-backend-1  |     raise last_error or exceptions.TargetServerAttributeNotMatched
+```json
+{"_time":"2026-04-03T20:48:21.050687232Z","severity":"INFO","service.name":"Learning Management Service","event":"request_started","method":"GET","path":"/items/","trace_id":"e1abe49928f5dad66fd7aa00aa1b103a","span_id":"a14f6e9dbaa40af9","otelTraceSampled":"true"}
+{"_time":"2026-04-03T20:48:21.05191168Z","severity":"INFO","service.name":"Learning Management Service","event":"auth_success","trace_id":"e1abe49928f5dad66fd7aa00aa1b103a","span_id":"a14f6e9dbaa40af9","otelTraceSampled":"true"}
+{"_time":"2026-04-03T20:48:21.052597504Z","severity":"INFO","service.name":"Learning Management Service","event":"db_query","operation":"select","table":"item","trace_id":"e1abe49928f5dad66fd7aa00aa1b103a","span_id":"a14f6e9dbaa40af9","otelTraceSampled":"true"}
 ```
 
-VictoriaLogs query `_time:30m severity:ERROR service.name:"Learning Management Service"`
-returned 3 ERROR entries:
+Required fields present: `severity`, `service.name`, `event`, `trace_id`.
+The event chain shows `request_started` → `auth_success` → `db_query`.
 
+### Error-path log excerpt (JSON from VictoriaLogs)
+
+After stopping PostgreSQL, query: `_time:2h service.name:"Learning Management Service" severity:ERROR limit=3`
+
+```json
+{"_time":"2026-04-03T20:48:21.168761856Z","severity":"ERROR","service.name":"Learning Management Service","event":"db_query","operation":"select","table":"item","error":"[Errno -2] Name or service not known","trace_id":"e1abe49928f5dad66fd7aa00aa1b103a","span_id":"a14f6e9dbaa40af9","otelTraceSampled":"true"}
+{"_time":"2026-04-03T20:48:21.16914176Z","severity":"ERROR","service.name":"Learning Management Service","event":"items_list_failed","error":"[Errno -2] Name or service not known","trace_id":"e1abe49928f5dad66fd7aa00aa1b103a","span_id":"a14f6e9dbaa40af9","otelTraceSampled":"true"}
+{"_time":"2026-04-03T20:48:21.169974528Z","severity":"ERROR","service.name":"Learning Management Service","event":"request_completed","method":"GET","path":"/items/","status":"500","trace_id":"e1abe49928f5dad66fd7aa00aa1b103a","span_id":"a14f6e9dbaa40af9","otelTraceSampled":"true"}
 ```
-[2026-04-03T19:43:26Z] ERROR Learning Management Service event=unhandled_exception
-[2026-04-03T19:43:19Z] ERROR Learning Management Service event=db_query
-[2026-04-03T19:43:15Z] ERROR Learning Management Service event=db_query
-```
+
+Error entries show: `severity:ERROR`, `service.name:"Learning Management Service"`,
+`event` values (`db_query`, `items_list_failed`, `request_completed`), `error` field with
+`[Errno -2] Name or service not known`, matching `trace_id`, and HTTP `status:500`.
 
 ### VictoriaLogs query
 
 Screenshot: VictoriaLogs UI at `http://<vm-ip>:42002/utils/victorialogs/select/vmui`
-with query `_time:30m service.name:"Learning Management Service" severity:ERROR`
-returns the 3 error entries with full JSON details including trace IDs.
+with query `_time:2h service.name:"Learning Management Service" severity:ERROR`
+returns error entries with full JSON details including `service.name`, `severity`,
+`event`, `trace_id`, `error`, and `status` fields.
 
 ## Task 3B — Traces
 
-### Healthy trace span hierarchy
+### Healthy trace span hierarchy (JSON from VictoriaTraces)
 
-Trace `c6f31bae7cf37361c8739319989089e6` (GET /items/ — 404, but structurally valid):
+Query: `GET /select/jaeger/api/traces?service=Learning+Management+Service&limit=1`
+
+Trace shows a successful request with the following span hierarchy:
 
 ```
-├─ GET HTTP 404 (1732ms)
-    ├─ GET /items/ HTTP 404 (1730ms)
-      ├─ connect  (1698ms)
-      ├─ GET /items/ http send 404 (0ms)
-      ├─ GET /items/ http send  (0ms)
-      ├─ GET /items/ http send  (0ms)
+GET /items/ HTTP 200 (121ms)
+  └─ connect  (115ms)
+  └─ GET /items/ http send 200 (0ms)
+  └─ GET /items/ http send  (0ms)
+  └─ GET /items/ http send  (0ms)
 ```
 
-The span hierarchy shows the request flowing through Caddy → backend → database.
-The `connect` step dominates the duration (1698ms).
+Span data in JSON:
+
+```json
+{"spanID":"a14f6e9dbaa40af9","parentSpanID":null,"operationName":"GET /items/","duration_us":121219,"http_status":"200","error":"false"}
+{"spanID":"0c3069e054dc4e7a","parentSpanID":"a14f6e9dbaa40af9","operationName":"connect","duration_us":115248,"error":"false"}
+{"spanID":"a11f74652191e3f5","parentSpanID":"a14f6e9dbaa40af9","operationName":"GET /items/ http send","duration_us":58,"http_status":"200","error":"false"}
+```
 
 ### Error trace
 
-After stopping postgres, the sync pipeline trace shows the failure at the
-`connect` step: `POST /pipeline/sync → HTTP 500` with `connect failed (274ms)`.
+After stopping PostgreSQL, the trace shows failure at the `connect` step:
+
+```
+GET /items/ HTTP 500 (121ms)
+  └─ connect ERROR (115ms)  ← database connection failed
+  └─ GET /items/ http send 500 ERROR (0ms)
+```
+
+Error span data:
+
+```json
+{"spanID":"a14f6e9dbaa40af9","parentSpanID":null,"operationName":"GET /items/","duration_us":121219,"http_status":"500","error":"true"}
+{"spanID":"0c3069e054dc4e7a","parentSpanID":"a14f6e9dbaa40af9","operationName":"connect","duration_us":115248,"error":"true"}
+{"spanID":"a11f74652191e3f5","parentSpanID":"a14f6e9dbaa40af9","operationName":"GET /items/ http send","duration_us":58,"http_status":"500","error":"true"}
+```
 
 VictoriaTraces UI at `http://<vm-ip>:42002/utils/victoriatraces` shows the
-span hierarchy with error tags.
+full span hierarchy with error tags visible in the timeline view.
 
 ## Task 3C — Observability MCP tools
 
