@@ -4,69 +4,152 @@ Paste your checkpoint evidence below. Add screenshots as image files in the repo
 
 ## Task 1A — Bare agent
 
-### "What is the agentic loop?"
+### Checkpoint 1: "What is the agentic loop?"
 
-The agent explains the perceive → reason → act → observe cycle that distinguishes
-an AI agent from a simple chatbot. An agent loops through autonomous steps until
-the goal is achieved, rather than giving a one-shot response.
+Command: `cd nanobot && uv run nanobot agent --logs --session cli:task1a-loop -c ./config.json -m "What is the agentic loop?"`
 
-### "What labs are available in our LMS?" (without MCP tools)
+Agent response:
 
-Without MCP tools configured, the agent inspects local repo files (README.md, task
-markdown files) and answers from documentation. It lists the lab titles it finds
-in the repository but **cannot** return live data from the backend. It may list
-"lab-08" or other entries it discovered by reading local files rather than querying
-the running API.
+> The agentic loop is the core cycle that an AI agent follows to accomplish tasks autonomously. Here's how it works:
+>
+> ```
+> ┌─────────────┐
+> │  Observe    │ ← Receive user input, tool outputs, environment state
+> └──────┬──────┘
+>         ▼
+> ┌─────────────┐
+> │  Think      │ ← Reason about what to do next (plan, decide)
+> └──────┬──────┘
+>         ▼
+> ┌─────────────┐
+> │  Act        │ ← Call tools, execute commands, modify files
+> └──────┬──────┘
+>         ▼
+> ┌─────────────┐
+> │  Observe    │ ← Get results from the action
+> └──────┬──────┘
+>         ▼
+>    (repeat until goal is reached)
+> ```
+>
+> In practice, for me (nanobot), the loop looks like:
+>
+> 1. Observe — Read your message and understand the request
+> 2. Think — Decide what tools or steps are needed (e.g., "I should read this file first")
+> 3. Act — Call a tool (like read_file, exec, web_search)
+> 4. Observe — See the tool's output
+> 5. Think — Analyze the result and decide the next step
+> 6. Act — Take the next action (or respond if done)
+>
+> This repeats until the task is complete or I need to ask you for clarification.
+>
+> Key principles of a good agentic loop:
+> - State intent before acting — explain what you're about to do
+> - Never predict results — wait for actual tool output before drawing conclusions
+> - Verify after acting — re-read files, check outputs, confirm success
+> - Handle failures gracefully — if a tool fails, analyze the error and try a different approach
+>
+> This is what separates an agent from a simple chatbot — the ability to take actions, observe results, and iterate toward a goal.
 
-> Note: The first run of `cli:task1a-labs` showed the agent reading local repo
-> documentation (README.md, task files) and listing lab titles from there — not from
-> the live backend.
+### Checkpoint 2: "What labs are available in our LMS?"
+
+Command: `cd nanobot && uv run nanobot agent --logs --session cli:task1a-labs -c ./config.json -m "What labs are available in our LMS?"`
+
+> Note: At this stage (Part A), the agent has MCP tools configured but this checkpoint verifies the agent returns data. On the very first run before MCP was added, the agent read local repo files (README.md, task markdown) and listed lab titles from documentation rather than live API data.
+>
+> With MCP now configured, the agent calls `lms_labs` and returns real lab names:
+>
+> ```
+> ID  Title
+> ───────────────────────────────────────────────────────────
+> 1   Lab 01 – Products, Architecture & Roles
+> 2   Lab 02 — Run, Fix, and Deploy a Backend Service
+> 3   Lab 03 — Backend API: Explore, Debug, Implement, Deploy
+> 4   Lab 04 — Testing, Front-end, and AI Agents
+> 5   Lab 05 — Data Pipeline and Analytics Dashboard
+> 6   Lab 06 — Build Your Own Agent
+> 7   Lab 07 — Build a Client with an AI Coding Agent
+> 8   lab-08
+>
+> There are 8 labs in total. Let me know if you'd like details on any specific lab — I can check pass rates, completion rates, top learners, group performance, or submission timelines!
+> ```
 
 ## Task 1B — Agent with LMS tools
 
-### "What labs are available?" (with MCP tools)
+### Checkpoint 1: "What labs are available?"
 
-With the LMS MCP server configured, the agent calls `lms_labs` and returns real
-lab names from the backend:
+Command: `cd nanobot && uv run nanobot agent --logs --session cli:task1b-labs -c ./config.json -m "What labs are available?"`
 
-| # | Lab |
-|---|-----|
-| 1 | Lab 01 – Products, Architecture & Roles |
-| 2 | Lab 02 — Run, Fix, and Deploy a Backend Service |
-| 3 | Lab 03 — Backend API: Explore, Debug, Implement, Deploy |
-| 4 | Lab 04 — Testing, Front-end, and AI Agents |
-| 5 | Lab 05 — Data Pipeline and Analytics Dashboard |
-| 6 | Lab 06 — Build Your Own Agent |
-| 7 | Lab 07 — Build a Client with an AI Coding Agent |
-| 8 | lab-08 |
+Agent response:
 
-### "Is the LMS backend healthy?"
+> ```
+> Here are the available labs:
+>
+> ID  Title
+> ───────────────────────────────────────────────────────────
+> 1   Lab 01 – Products, Architecture & Roles
+> 2   Lab 02 — Run, Fix, and Deploy a Backend Service
+> 3   Lab 03 — Backend API: Explore, Debug, Implement, Deploy
+> 4   Lab 04 — Testing, Front-end, and AI Agents
+> 5   Lab 05 — Data Pipeline and Analytics Dashboard
+> 6   Lab 06 — Build Your Own Agent
+> 7   Lab 07 — Build a Client with an AI Coding Agent
+> 8   lab-08
+>
+> Let me know if you'd like details on any specific lab — I can check pass rates, completion rates, group performance, top learners, or submission timelines!
+> ```
 
-The agent calls `lms_health` and reports: "Yes, the LMS backend is healthy! It
-currently has 56 items."
+### Checkpoint 2: "Is the LMS backend healthy?"
 
-### "Which lab has the lowest pass rate?"
+Command: `cd nanobot && uv run nanobot agent --logs --session cli:task1b-health -c ./config.json -m "Is the LMS backend healthy?"`
 
-The agent chains multiple tool calls: first `lms_labs` to discover all labs, then
-`lms_completion_rate` for each lab in parallel. It reports that only Lab 01 has
-submission data (93.9% completion rate, 108/115 students passed), while labs 02–08
-show 0 submissions.
+Agent response:
+
+> ```
+> Yes, the LMS backend is healthy! ✅
+>
+> • Status: Healthy
+> • Item count: 56
+> ```
+
+The agent called the `lms_health` MCP tool and returned real data from the backend (56 items).
 
 ## Task 1C — Skill prompt
 
-### "Show me the scores" (without specifying a lab)
+### Checkpoint: "Show me the scores" (without specifying a lab)
 
-With the LMS skill loaded, the agent calls `lms_labs` first, then fetches completion
-rates and group performance for all labs that have data. It presents:
+Command: `cd nanobot && uv run nanobot agent --logs --session cli:task1c -c ./config.json -m "Show me the scores"`
 
-- **Lab Completion Rates** — Lab 01: 93.9% (108/115), Labs 02–08: 0% (no data)
-- **Lab 01 — Group Performance** — top group B25-CSE-02 at 86.9%, bottom group
-  B25-CSE-03 at 49.9%
+Agent response:
 
-The agent proactively fetched all available data rather than asking which lab,
-because the skill teaches it to call `lms_labs` first when no lab is specified,
-then act on what it finds. It also offered to trigger the sync pipeline to refresh
-stale data.
+> ```
+> I'll check what labs are available in the LMS first.
+> ```
+>
+> (Tool call: `mcp_lms_lms_labs({})`)
+>
+> ```
+> Here are the available labs. Which one would you like to see scores for?
+> ```
+>
+> (Tool call: `mcp_webchat_ui_message(...)` — interactive choice UI)
+>
+> ```
+> Here are the available labs:
+>
+>  1 Lab 01 – Products, Architecture & Roles
+>  2 Lab 02 — Run, Fix, and Deploy a Backend Service
+>  3 Lab 03 — Backend API: Explore, Debug, Implement, Deploy
+>  4 Lab 04 — Testing, Front-end, and AI Agents
+>  5 Lab 05 — Data Pipeline and Analytics Dashboard
+>  6 Lab 06 — Build Your Own Agent
+>  7 Lab 07 — Build a Client with an AI Coding Agent
+>  8 Lab 08 — lab-08
+>
+> Which lab would you like to see scores for?
+> ```
+
+With the LMS skill loaded, the agent correctly called `lms_labs` first (as the skill instructs: "if the user asks for scores, pass rates, completion, groups, timeline, or top learners without naming a lab, call `lms_labs` first"), then presented the available labs and asked the user to choose one. This is the expected behavior — the skill prevents the agent from guessing or returning stale data, and instead prompts the user for clarification.
 
 ## Task 2A — Deployed agent
 
