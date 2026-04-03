@@ -9,7 +9,7 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/nanobot-venv
 WORKDIR /app
 
 COPY --from=workspace pyproject.toml uv.lock /app/
-COPY pyproject.toml README.md /app/nanobot/
+COPY pyproject.toml /app/nanobot/
 COPY --from=workspace mcp /app/mcp
 COPY --from=workspace nanobot-websocket-channel /app/nanobot-websocket-channel
 
@@ -31,15 +31,19 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV LANG=C.UTF-8
 
-RUN groupadd --gid "${APP_GID}" nonroot \
-    && useradd --uid "${APP_UID}" --gid "${APP_GID}" --create-home nonroot
+# Skip user creation if running as root (UID=0)
+RUN if [ "${APP_UID}" != "0" ]; then \
+        groupadd --gid "${APP_GID}" nonroot \
+        && useradd --uid "${APP_UID}" --gid "${APP_GID}" --create-home nonroot; \
+    fi
 
-COPY --from=builder --chown=${APP_UID}:${APP_GID} /opt/nanobot-venv /opt/nanobot-venv
-COPY --from=builder --chown=${APP_UID}:${APP_GID} /app /app
+COPY --from=builder /opt/nanobot-venv /opt/nanobot-venv
+COPY --from=builder /app /app
 
 ENV PATH="/opt/nanobot-venv/bin:$PATH"
 
-USER nonroot
+# Only switch user if not root
+USER ${APP_UID:-0}:${APP_GID:-0}
 WORKDIR /app/nanobot
 
 CMD ["python", "/app/nanobot/entrypoint.py"]
