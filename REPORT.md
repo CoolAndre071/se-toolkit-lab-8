@@ -227,15 +227,103 @@ Response to webchat:...: I've sent you a list of available labs. Please pick whi
 
 ## Task 3A — Structured logging
 
-<!-- Paste happy-path and error-path log excerpts, VictoriaLogs query screenshot -->
+### Happy-path log excerpt
+
+From `docker compose logs backend --tail 40`, a healthy request shows the
+structured event chain:
+
+```
+backend-1  | request_started
+backend-1  | [trace_id=4b496ec1...] auth_success
+backend-1  | [trace_id=4b496ec1...] request_completed
+```
+
+The full log lines include `service.name="Learning Management Service"`,
+`trace_id`, `span_id`, and `trace_sampled=True`.
+
+### Error-path log excerpt
+
+After stopping PostgreSQL and triggering a request:
+
+```
+backend-1  | socket.gaierror: [Errno -2] Name or service not known
+backend-1  |   File ".../asyncpg/connect_utils.py", line 1249, in _connect
+backend-1  |     raise last_error or exceptions.TargetServerAttributeNotMatched
+```
+
+VictoriaLogs query `_time:30m severity:ERROR service.name:"Learning Management Service"`
+returned 3 ERROR entries:
+
+```
+[2026-04-03T19:43:26Z] ERROR Learning Management Service event=unhandled_exception
+[2026-04-03T19:43:19Z] ERROR Learning Management Service event=db_query
+[2026-04-03T19:43:15Z] ERROR Learning Management Service event=db_query
+```
+
+### VictoriaLogs query
+
+Screenshot: VictoriaLogs UI at `http://<vm-ip>:42002/utils/victorialogs/select/vmui`
+with query `_time:30m service.name:"Learning Management Service" severity:ERROR`
+returns the 3 error entries with full JSON details including trace IDs.
 
 ## Task 3B — Traces
 
-<!-- Screenshots: healthy trace span hierarchy, error trace -->
+### Healthy trace span hierarchy
+
+Trace `c6f31bae7cf37361c8739319989089e6` (GET /items/ — 404, but structurally valid):
+
+```
+├─ GET HTTP 404 (1732ms)
+    ├─ GET /items/ HTTP 404 (1730ms)
+      ├─ connect  (1698ms)
+      ├─ GET /items/ http send 404 (0ms)
+      ├─ GET /items/ http send  (0ms)
+      ├─ GET /items/ http send  (0ms)
+```
+
+The span hierarchy shows the request flowing through Caddy → backend → database.
+The `connect` step dominates the duration (1698ms).
+
+### Error trace
+
+After stopping postgres, the sync pipeline trace shows the failure at the
+`connect` step: `POST /pipeline/sync → HTTP 500` with `connect failed (274ms)`.
+
+VictoriaTraces UI at `http://<vm-ip>:42002/utils/victoriatraces` shows the
+span hierarchy with error tags.
 
 ## Task 3C — Observability MCP tools
 
-<!-- Paste agent responses to "any errors in the last hour?" under normal and failure conditions -->
+### Normal conditions: "Any LMS backend errors in the last 10 minutes?"
+
+> No errors found for the **Learning Management Service** in the last 10 minutes.
+> The LMS backend looks clean. 👍
+
+The agent called `obs_logs_error_count` first, found 0 errors, and reported
+clean status without unnecessary tool calls.
+
+### Failure conditions (PostgreSQL stopped): "Any LMS backend errors in the last 10 minutes?"
+
+> Yes, there are **3 ERROR entries** for the Learning Management Service
+> in the last 10 minutes. Let me grab more details:
+>
+> The log entries are brief. Let me inspect the traces for more detail,
+> starting with the unhandled exception:
+>
+> Here's a summary of the **3 errors** in the last 10 minutes:
+>
+> | Time | Event | Trace | Details |
+> |------|-------|-------|---------|
+> | 20:04:56 | `db_query` | `eea704e2...` | `GET /items/` → **HTTP 404** (352ms). Connect step failed (344ms). |
+> | 20:04:53 | `unhandled_exception` | `578f7d6a...` | `POST /pipeline/sync` → **HTTP 500** (1083ms). Connect step failed (274ms). |
+> | 20:04:48 | `db_query` | `84589fd7...` | `GET /items/` → **HTTP 404** (253ms). Connect step failed (217ms). |
+>
+> **Pattern:** All 3 errors are database connection failures — the backend
+> can't reach PostgreSQL. The `connect` step in each trace failed, indicating
+> the database container is unavailable.
+
+The agent chained all four tools: `obs_logs_error_count` → `obs_logs_search`
+→ `obs_traces_get` (for each trace) → summary. No raw JSON was dumped.
 
 ## Task 4A — Multi-step investigation
 
