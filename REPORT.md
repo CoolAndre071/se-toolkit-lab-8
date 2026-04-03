@@ -153,11 +153,77 @@ With the LMS skill loaded, the agent correctly called `lms_labs` first (as the s
 
 ## Task 2A — Deployed agent
 
-<!-- Paste a short nanobot startup log excerpt showing the gateway started inside Docker -->
+Command: `docker compose --env-file .env.docker.secret ps` → nanobot service is "Up"
+Command: `docker compose --env-file .env.docker.secret logs nanobot --tail 50`
+
+Startup log excerpt:
+
+```
+nanobot-1  | Using config: /app/nanobot/config.resolved.json
+nanobot-1  | 🐈 Starting nanobot gateway version 0.1.4.post5 on port 18790...
+nanobot-1  | ✓ Channels enabled: webchat
+nanobot-1  | ✓ Heartbeat: every 1800s
+nanobot-1  | MCP server 'lms': connected, 9 tools registered
+nanobot-1  | MCP server 'webchat': connected, 1 tools registered
+nanobot-1  | Agent loop started
+```
+
+The nanobot gateway started cleanly inside Docker, with both the LMS MCP server
+and the webchat MCP server connected.
 
 ## Task 2B — Web client
 
-<!-- Screenshot of a conversation with the agent in the Flutter web app -->
+### WebSocket endpoint test
+
+Command: `echo '{"content":"What labs are available?"}' | websocat "ws://localhost:42002/ws/chat?access_key=1234567"`
+
+Agent response via WebSocket:
+
+> ```json
+> {"type":"text","content":"Here are the available labs:\n\n1. **Lab 01** – Products, Architecture & Roles\n2. **Lab 02** — Run, Fix, and Deploy a Backend Service\n3. **Lab 03** — Backend API: Explore, Debug, Implement, Deploy\n4. **Lab 04** — Testing, Front-end, and AI Agents\n5. **Lab 05** — Data Pipeline and Analytics Dashboard\n6. **Lab 06** — Build Your Own Agent\n7. **Lab 07** — Build a Client with an AI Coding Agent\n8. lab-08","format":"markdown"}
+> ```
+
+### "How is the backend doing?"
+
+> ```json
+> {"type":"text","content":"The LMS backend is healthy! 🟢\n\n- **Status**: Healthy\n- **Item count**: 56 items\n\nEverything looks good on the backend side.","format":"markdown"}
+> ```
+
+The agent called `mcp_lms_lms_health({})` and returned real backend data.
+
+### "Show me the scores" (without specifying a lab)
+
+The agent correctly calls `lms_labs` first, then sends a structured UI choice
+via `mcp_webchat_ui_message`:
+
+> Log evidence:
+> ```
+> Tool call: mcp_lms_lms_labs({})
+> Tool call: mcp_webchat_ui_message({"payload": {"type": "choice", "text": "Which lab would you like to see scores for?", "choices": [{"label": "Lab 01 – Products, Architecture & Roles", "value": "lab-01"}, ...]}})
+> ```
+
+The structured-ui skill renders this as an interactive choice UI in the Flutter
+client, allowing the user to pick a lab rather than showing raw JSON.
+
+### Flutter web client
+
+The Flutter client is accessible at `http://<vm-ip>:42002/flutter` (HTTP 200).
+It prompts for `NANOBOT_ACCESS_KEY` (1234567) before allowing chat.
+
+### Nanobot logs showing webchat message flow
+
+```
+Processing message from webchat:...: How is the backend doing?
+Tool call: mcp_lms_lms_health({})
+Response to webchat:...: The LMS backend is healthy! 🟢
+```
+
+```
+Processing message from webchat:...: Show me the scores
+Tool call: mcp_lms_lms_labs({})
+Tool call: mcp_webchat_ui_message({"payload": {"type": "choice", ...}})
+Response to webchat:...: I've sent you a list of available labs. Please pick which one you'd like to see the scores for!
+```
 
 ## Task 3A — Structured logging
 
