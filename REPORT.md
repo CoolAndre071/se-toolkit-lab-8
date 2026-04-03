@@ -327,15 +327,145 @@ The agent chained all four tools: `obs_logs_error_count` → `obs_logs_search`
 
 ## Task 4A — Multi-step investigation
 
-<!-- Paste the agent's response to "What went wrong?" showing chained log + trace investigation -->
+### "What went wrong?" (with PostgreSQL stopped)
+
+Agent response:
+
+> I'll check the system health and look for recent errors. Let me investigate.
+>
+> Found 3 errors and the LMS backend is reporting unhealthy (HTTP 404). Let me dig deeper into the logs and traces.
+>
+> Here's what I found:
+>
+> ## System Status: **Unhealthy** 🔴
+>
+> The LMS backend is returning **HTTP 404** on its health check endpoint, and there are **3 errors** in the last 10 minutes.
+>
+> ### Error Details
+>
+> | Time | Event | Trace | HTTP Status |
+> |------|-------|-------|-------------|
+> | 20:18:14 | `db_query` | `4e7753c1...` | **404** on `GET /items/` |
+> | 20:18:10 | `unhandled_exception` | `1da99ef9...` | **500** on `POST /pipeline/sync` |
+> | 20:18:06 | `db_query` | `715146cc...` | **404** on `GET /items/` |
+>
+> ### Trace Analysis
+>
+> Examining trace `4e7753c1...` for `GET /items/`:
+> - Root span: `GET /items/` → HTTP 404 (352ms)
+>   - Child: `connect` → **ERROR** (344ms) — database connection failed
+>
+> Examining trace `1da99ef9...` for `POST /pipeline/sync`:
+> - Root span: `POST /pipeline/sync` → HTTP 500 (1157ms)
+>   - Child: `connect` → **ERROR** — pipeline sync also fails to reach DB
+>
+> **Conclusion:** PostgreSQL is unreachable. All database operations fail at the
+> `connect` step. The LMS backend cannot establish any database connections.
+>
+> **Notable discrepancy:** The `GET /items/` endpoint returns **HTTP 404 "Items not found"**
+> when the database is down — this is misleading. A database connection failure should
+> return HTTP 500, not 404. This suggests a bug in the backend's error-handling path.
+
+The agent chained: `logs_error_count` → `logs_search` → `traces_get` (twice) → summary,
+and explicitly called out the 404-vs-500 discrepancy as a suspected bug.
 
 ## Task 4B — Proactive health check
 
-<!-- Screenshot or transcript of the proactive health report that appears in the Flutter chat -->
+### Cron job created
+
+> I've created a recurring health check (job ID: `fa74236e`) that runs every 2 minutes.
+
+### Scheduled jobs listing
+
+> | Job | Schedule | Next Run |
+> |-----|----------|----------|
+> | **HEALTH CHECK** — Check for LMS/ba | Every 2 minutes | 2026-04-03 20:35 UTC |
+
+### Proactive health report (while PostgreSQL is stopped)
+
+> **🔍 Health Check — 2026-04-03 20:32 UTC**
+>
+> ⚠️ **3 errors found** in the last 2 minutes:
+>
+> | Time | Event | Trace | Detail |
+> |------|-------|-------|--------|
+> | 20:32:47 | `unhandled_exception` | `4931…fff6` | POST `/pipeline/sync` → **HTTP 500** (1157ms). Connect error during sync pipeline. |
+> | 20:32:43 | `db_query` | `190a…11b8` | GET `/items/` → **HTTP 404** (253ms). Connect error on DB query. |
+> | 20:32:40 | `db_query` | `803b…abee` | Similar DB query error. |
+>
+> **Summary:** The LMS backend is experiencing database connection failures.
+> PostgreSQL appears to be unreachable. All operations that require the database
+> are failing at the `connect` step.
+
+### Nanobot log showing cron execution
+
+```
+Tool call: message({"content": "🔍 Health Check — 2026-04-03 20:32 UTC\n⚠️ 3 errors found...", "chat_id": "..."})
+```
 
 ## Task 4C — Bug fix and recovery
 
-<!-- 1. Root cause identified
-     2. Code fix (diff or description)
-     3. Post-fix response to "What went wrong?" showing the real underlying failure
-     4. Healthy follow-up report or transcript after recovery -->
+### 1. Root cause identified
+
+**File:** `backend/src/lms_backend/routers/items.py`, `get_items()` endpoint (line 17-28)
+
+**Bug:** The `GET /items/` handler catches all `Exception` and returns
+`HTTP 404 "Items not found"`, even when the real failure is a database
+connection error. This masks infrastructure failures from the agent and users.
+
+```python
+# BEFORE (buggy)
+except Exception as exc:
+    logger.warning("items_list_failed_as_not_found", ...)
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Items not found",
+    ) from exc
+```
+
+### 2. Code fix
+
+Changed to return HTTP 500 with a descriptive message for unexpected errors:
+
+```python
+# AFTER (fixed)
+except Exception as exc:
+    logger.error("items_list_failed",
+        extra={"event": "items_list_failed", "error": str(exc)},
+    )
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Failed to retrieve items from the database",
+    ) from exc
+```
+
+### 3. Post-fix response to "What went wrong?" (after redeploy, PostgreSQL stopped)
+
+> **Summary:** The LMS backend is down due to database connection failures.
+>
+> | Source | Finding |
+> |--------|---------|
+> | **Health Check** | LMS reports `unhealthy` with HTTP 500 |
+> | **Error Count** | 9 ERROR entries in the last 10 minutes |
+> | **Trace Analysis** | Root cause: `connect` operation failing (135ms timeout) |
+>
+> **Failure Chain:**
+> ```
+> GET /items/ → HTTP 500
+>   └─ connect → ERROR (135ms)  ← root cause: database connection failure
+> ```
+
+After the fix, the backend correctly reports **HTTP 500** instead of the old
+misleading 404, and the agent identifies the database connection failure directly.
+
+### 4. Healthy follow-up report (after PostgreSQL restart)
+
+After restarting PostgreSQL, the scheduled health check reports:
+
+> 🟢 **LMS Health Check** — System looks healthy. No errors detected
+> in the Learning Management Service over the last 2 minutes.
+
+Nanobot logs confirm:
+```
+Tool call: message({"content": "🟢 **LMS Health Check** — System looks healthy..."})
+```
